@@ -16,5 +16,8 @@ export interface StpRegistraOrdenResponse {
   errorCode?: number;
   message: string;
   rawResponse?: any;
+  // Campos de debug
+  cadenaOriginal?: string;
+  firma?: string;
 }
 

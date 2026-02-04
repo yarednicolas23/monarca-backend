@@ -35,14 +35,15 @@ export class StpService {
     try {
       // Construir la cadena original
       const cadenaOriginal = this.construirCadenaOriginal(ordenPago);
-      this.logger.debug(`Cadena original: ${cadenaOriginal}`);
+      this.logger.log(`Cadena original: ${cadenaOriginal}`);
 
       // Generar la firma electrónica
       const firma = this.generarFirma(cadenaOriginal);
-      this.logger.debug(`Firma generada: ${firma.substring(0, 50)}...`);
+      this.logger.log(`Firma generada: ${firma}`);
 
       // Construir el payload
       const payload = this.construirPayload(ordenPago, firma);
+      this.logger.log(`Payload: ${JSON.stringify(payload, null, 2)}`);
 
       // Realizar la petición PUT
       const url = `${this.baseUrl}/speiws/rest/ordenPago/registra`;
@@ -59,7 +60,12 @@ export class StpService {
 
       this.logger.log(`Respuesta de STP: ${JSON.stringify(response.data)}`);
 
-      return this.procesarRespuesta(response.data);
+      const resultado = this.procesarRespuesta(response.data);
+      // Agregar información de debug
+      resultado.cadenaOriginal = cadenaOriginal;
+      resultado.firma = firma;
+      
+      return resultado;
     } catch (error) {
       this.logger.error(`Error al registrar orden de pago: ${error.message}`, error.stack);
       
@@ -127,16 +133,18 @@ export class StpService {
 
   /**
    * Genera la firma electrónica usando la llave privada
-   * Algoritmo: RSA-SHA256, codificado en Base64
+   * Algoritmo: SHA256 con RSA, codificado en Base64
    */
   private generarFirma(cadenaOriginal: string): string {
     try {
       // Leer la llave privada
       const privateKey = fs.readFileSync(this.privateKeyPath, 'utf8');
 
-      // Crear el firmante
-      const sign = crypto.createSign('RSA-SHA256');
-      sign.update(cadenaOriginal);
+      // Crear el firmante con SHA256
+      const sign = crypto.createSign('sha256');
+      
+      // Actualizar con la cadena original en UTF-8
+      sign.update(cadenaOriginal, 'utf8');
       sign.end();
 
       // Firmar con la llave privada
@@ -157,47 +165,57 @@ export class StpService {
 
   /**
    * Construye el payload para la petición REST
+   * IMPORTANTE: STP requiere que los valores numéricos se envíen como strings
    */
   private construirPayload(orden: OrdenPagoDto, firma: string): any {
-    return {
-      institucionContraparte: orden.institucionContraparte,
-      empresa: orden.empresa ?? this.empresa,
-      fechaOperacion: orden.fechaOperacion,
-      folioOrigen: orden.folioOrigen,
-      claveRastreo: orden.claveRastreo,
-      institucionOperante: orden.institucionOperante ?? this.institucionOperante,
-      monto: orden.monto,
-      tipoPago: orden.tipoPago,
-      tipoCuentaOrdenante: orden.tipoCuentaOrdenante,
-      nombreOrdenante: orden.nombreOrdenante,
-      cuentaOrdenante: orden.cuentaOrdenante,
-      rfcCurpOrdenante: orden.rfcCurpOrdenante,
-      tipoCuentaBeneficiario: orden.tipoCuentaBeneficiario,
-      nombreBeneficiario: orden.nombreBeneficiario,
-      cuentaBeneficiario: orden.cuentaBeneficiario,
-      rfcCurpBeneficiario: orden.rfcCurpBeneficiario,
-      emailBeneficiario: orden.emailBeneficiario,
-      tipoCuentaBeneficiario2: orden.tipoCuentaBeneficiario2,
-      nombreBeneficiario2: orden.nombreBeneficiario2,
-      cuentaBeneficiario2: orden.cuentaBeneficiario2,
-      rfcCurpBeneficiario2: orden.rfcCurpBeneficiario2,
-      conceptoPago: orden.conceptoPago,
-      conceptoPago2: orden.conceptoPago2,
-      claveCatUsuario1: orden.claveCatUsuario1,
-      claveCatUsuario2: orden.claveCatUsuario2,
-      clavePago: orden.clavePago,
-      referenciaCobranza: orden.referenciaCobranza,
-      referenciaNumerica: orden.referenciaNumerica,
-      tipoOperacion: orden.tipoOperacion,
-      topologia: orden.topologia,
-      usuario: orden.usuario,
-      medioEntrega: orden.medioEntrega,
-      prioridad: orden.prioridad,
-      iva: orden.iva,
-      longitud: orden.longitud,
-      latitud: orden.latitud,
-      firma: firma,
-    };
+    const payload: Record<string, string> = {};
+
+    // Campos obligatorios - convertir a string
+    payload.claveRastreo = orden.claveRastreo;
+    payload.conceptoPago = orden.conceptoPago;
+    payload.cuentaOrdenante = orden.cuentaOrdenante;
+    payload.cuentaBeneficiario = orden.cuentaBeneficiario;
+    payload.empresa = orden.empresa ?? this.empresa;
+    payload.institucionContraparte = String(orden.institucionContraparte);
+    payload.institucionOperante = String(orden.institucionOperante ?? this.institucionOperante);
+    payload.monto = String(orden.monto);
+    payload.nombreBeneficiario = orden.nombreBeneficiario;
+    payload.nombreOrdenante = orden.nombreOrdenante;
+    payload.referenciaNumerica = String(orden.referenciaNumerica);
+    payload.rfcCurpBeneficiario = orden.rfcCurpBeneficiario;
+    payload.rfcCurpOrdenante = orden.rfcCurpOrdenante;
+    payload.tipoCuentaBeneficiario = String(orden.tipoCuentaBeneficiario);
+    payload.tipoCuentaOrdenante = String(orden.tipoCuentaOrdenante);
+    payload.tipoPago = String(orden.tipoPago);
+
+    // Campos de geolocalización
+    payload.latitud = orden.latitud;
+    payload.longitud = orden.longitud;
+
+    // Firma
+    payload.firma = firma;
+
+    // Campos opcionales - solo agregar si tienen valor
+    if (orden.fechaOperacion) payload.fechaOperacion = String(orden.fechaOperacion);
+    if (orden.folioOrigen) payload.folioOrigen = orden.folioOrigen;
+    if (orden.emailBeneficiario) payload.emailBeneficiario = orden.emailBeneficiario;
+    if (orden.tipoCuentaBeneficiario2) payload.tipoCuentaBeneficiario2 = String(orden.tipoCuentaBeneficiario2);
+    if (orden.nombreBeneficiario2) payload.nombreBeneficiario2 = orden.nombreBeneficiario2;
+    if (orden.cuentaBeneficiario2) payload.cuentaBeneficiario2 = orden.cuentaBeneficiario2;
+    if (orden.rfcCurpBeneficiario2) payload.rfcCurpBeneficiario2 = orden.rfcCurpBeneficiario2;
+    if (orden.conceptoPago2) payload.conceptoPago2 = orden.conceptoPago2;
+    if (orden.claveCatUsuario1) payload.claveCatUsuario1 = String(orden.claveCatUsuario1);
+    if (orden.claveCatUsuario2) payload.claveCatUsuario2 = String(orden.claveCatUsuario2);
+    if (orden.clavePago) payload.clavePago = orden.clavePago;
+    if (orden.referenciaCobranza) payload.referenciaCobranza = orden.referenciaCobranza;
+    if (orden.tipoOperacion) payload.tipoOperacion = orden.tipoOperacion;
+    if (orden.topologia) payload.topologia = orden.topologia;
+    if (orden.usuario) payload.usuario = orden.usuario;
+    if (orden.medioEntrega) payload.medioEntrega = String(orden.medioEntrega);
+    if (orden.prioridad) payload.prioridad = String(orden.prioridad);
+    if (orden.iva) payload.iva = String(orden.iva);
+
+    return payload;
   }
 
   /**
